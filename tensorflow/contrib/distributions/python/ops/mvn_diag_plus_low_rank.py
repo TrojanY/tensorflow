@@ -155,8 +155,8 @@ class MultivariateNormalDiagPlusLowRank(
     The `batch_shape` is the broadcast shape between `loc` and `scale`
     arguments.
 
-    The `event_shape` is given by the last dimension of `loc` or the last
-    dimension of the matrix implied by `scale`.
+    The `event_shape` is given by last dimension of the matrix implied by
+    `scale`. The last dimension of `loc` (if provided) must broadcast with this.
 
     Recall that `covariance = scale @ scale.T`. A (non-batch) `scale` matrix is:
 
@@ -237,7 +237,7 @@ class MultivariateNormalDiagPlusLowRank(
             scale_perturb_diag,
             name="scale_perturb_diag")
         if has_low_rank:
-          scale = linalg.LinearOperatorUDVHUpdate(
+          scale = linalg.LinearOperatorLowRankUpdate(
               scale,
               u=scale_perturb_factor,
               diag_update=scale_perturb_diag,

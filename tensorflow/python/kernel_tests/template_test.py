@@ -50,6 +50,13 @@ def function_with_create(trainable):
       "dummy", shape=[1], initializer=init_ops.zeros_initializer())
 
 
+def variable_scoped_function_with_local_variable():
+  variable_scope.get_local_variable(
+      "local", shape=[1], initializer=init_ops.zeros_initializer())
+  return variable_scope.get_variable(
+      "dummy", shape=[1], initializer=init_ops.zeros_initializer())
+
+
 class TemplateTest(test.TestCase):
 
   def test_end_to_end(self):
@@ -306,7 +313,7 @@ class TemplateTest(test.TestCase):
     self.assertEqual(custom_getter_count[0], 2)
 
     # Test that custom getter is called when the variable scope is created
-    # during construction
+  # during construction
     custom_getter_count[0] = 0
     tmpl2 = template.make_template(
         "s2",
@@ -318,6 +325,28 @@ class TemplateTest(test.TestCase):
     self.assertEqual(custom_getter_count[0], 1)
     tmpl2()
     self.assertEqual(custom_getter_count[0], 2)
+
+  def test_fails_gracefully(self):
+    for create_scope_now in [True, False]:
+      def module_function_with_one_arg(inputs):
+        w = variable_scope.get_variable(
+            "w", shape=[1], initializer=init_ops.zeros_initializer())
+        return inputs * w
+
+      templatized_function = template.make_template(
+          "f1", module_function_with_one_arg,
+          create_scope_now_=create_scope_now)
+      data = array_ops.zeros(1)
+      try:
+        # Try to connect with a kwarg which is unsupported.
+        templatized_function(data, is_training=True)
+      except TypeError:
+        pass
+
+      # The failed __call__ hasn't modified the inner state.
+      self.assertFalse(templatized_function._variables_created)
+      templatized_function(data)
+      self.assertTrue(templatized_function._variables_created)
 
   def test_name_scopes_for_variable_scopes(self):
     # Test that name scopes are not unnecessarily uniquified (but are
@@ -366,6 +395,58 @@ class TemplateTest(test.TestCase):
     self.assertEquals("foo_1_2/add:0", outputs_d.name,
                       "Second application of template should also get "
                       "a freshly uniquified name scope.")
+
+  def test_global_variables(self):
+    # Make sure global_variables are created.
+    with variable_scope.variable_scope("foo"):
+      # Create two templates with the same name, ensure scopes are made unique.
+      ta = template.make_template("bar", variable_scoped_function, True)
+      tb = template.make_template("s", function_with_create, trainable=False)
+
+    # Initially there are not variables created.
+    self.assertEqual([], ta.global_variables)
+    self.assertEqual([], tb.global_variables)
+    # After calling there are variables created.
+    ta()
+    tb()
+    # Ensure we can get the scopes before either template is actually called.
+    self.assertEqual(1, len(ta.global_variables))
+    self.assertEqual(2, len(tb.global_variables))
+
+  def test_trainable_variables(self):
+    # Make sure trainable_variables are created.
+    with variable_scope.variable_scope("foo2"):
+      # Create two templates with the same name, ensure scopes are made unique.
+      ta = template.make_template("bar", variable_scoped_function, True)
+      tb = template.make_template("bar", variable_scoped_function, True)
+
+    # Initially there are not variables created.
+    self.assertEqual([], ta.trainable_variables)
+    self.assertEqual([], tb.trainable_variables)
+    # After calling there are variables created.
+    ta()
+    tb()
+    # Ensure we can get the scopes before either template is actually called.
+    self.assertEqual(1, len(ta.trainable_variables))
+    self.assertEqual(1, len(tb.trainable_variables))
+
+  def test_local_variables(self):
+    # Make sure trainable_variables are created.
+    with variable_scope.variable_scope("foo3"):
+      # Create two templates with the same name, ensure scopes are made unique.
+      ta = template.make_template("bar", variable_scoped_function, True)
+      tb = template.make_template("bar",
+                                  variable_scoped_function_with_local_variable)
+
+    # Initially there are not variables created.
+    self.assertEqual([], ta.local_variables)
+    self.assertEqual([], tb.local_variables)
+    # After calling there are variables created.
+    ta()
+    tb()
+    # Ensure we can get the scopes before either template is actually called.
+    self.assertEqual(0, len(ta.local_variables))
+    self.assertEqual(1, len(tb.local_variables))
 
 
 if __name__ == "__main__":

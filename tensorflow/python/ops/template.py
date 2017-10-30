@@ -261,25 +261,73 @@ class Template(object):
           return self._call_func(args, kwargs, check_for_new_variables=True)
       else:
         # This is the first visit to __call__, but the scope has already been
-        # created in the constructor. Set _variables_created so that subsequent
-        # calls take the if branch above.
-        self._variables_created = True
+        # created in the constructor. Set _variables_created after the inner
+        # function is successfully called so that subsequent calls take the if
+        # branch above.
         with variable_scope.variable_scope(self._variable_scope):
-          return self._call_func(args, kwargs, check_for_new_variables=False)
+          result = self._call_func(args, kwargs, check_for_new_variables=False)
+          self._variables_created = True
+          return result
     else:
       # The scope was not created at construction time, so create it here.
       # Subsequent calls should reuse variables.
-      self._variables_created = True
       with variable_scope.variable_scope(
           self._unique_name, self._name,
           custom_getter=self._custom_getter) as vs:
         self._variable_scope = vs
-        return self._call_func(args, kwargs, check_for_new_variables=False)
+        result = self._call_func(args, kwargs, check_for_new_variables=False)
+        self._variables_created = True
+        return result
+
+  @property
+  def name(self):
+    """Returns the name given to this Template."""
+    return self._name
+
+  @property
+  def func(self):
+    """Returns the func given to this Template."""
+    return self._func
 
   @property
   def variable_scope(self):
     """Returns the variable scope object created by this Template."""
     return self._variable_scope
+
+  @property
+  def variable_scope_name(self):
+    """Returns the variable scope name created by this Template."""
+    if self._variable_scope:
+      name = self._variable_scope.name
+      # To prevent partial matches on the scope_name, we add '/' at the end.
+      return name if name[-1] == "/" else name + "/"
+
+  @property
+  def trainable_variables(self):
+    """Returns the list of trainable variables created by the Template."""
+    if self._variables_created:
+      return ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES,
+                                self.variable_scope_name)
+    else:
+      return []
+
+  @property
+  def global_variables(self):
+    """Returns the list of global variables created by the Template."""
+    if self._variables_created:
+      return ops.get_collection(ops.GraphKeys.GLOBAL_VARIABLES,
+                                self.variable_scope_name)
+    else:
+      return []
+
+  @property
+  def local_variables(self):
+    """Returns the list of global variables created by the Template."""
+    if self._variables_created:
+      return ops.get_collection(ops.GraphKeys.LOCAL_VARIABLES,
+                                self.variable_scope_name)
+    else:
+      return []
 
   @property
   @deprecated(

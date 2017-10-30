@@ -14,9 +14,13 @@
 # ==============================================================================
 """Ops for memory statistics.
 
+@@BytesInUse
+@@BytesLimit
 @@MaxBytesInUse
 """
 
+from tensorflow.contrib.memory_stats.python.ops.memory_stats_ops import BytesInUse
+from tensorflow.contrib.memory_stats.python.ops.memory_stats_ops import BytesLimit
 from tensorflow.contrib.memory_stats.python.ops.memory_stats_ops import MaxBytesInUse
 
 from tensorflow.python.util.all_util import remove_undocumented

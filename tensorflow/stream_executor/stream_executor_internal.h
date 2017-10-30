@@ -48,27 +48,9 @@ limitations under the License.
 namespace perftools {
 namespace gputools {
 
-class KernelBase;
 class Stream;
 class Timer;
 
-namespace blas {
-class BlasSupport;
-}  // namespace blas
-
-namespace fft {
-class Support;
-}  // namespace fft
-
-namespace rng {
-class RngSupport;
-}  // namespace rng
-
-}  // namespace gputools
-}  // namespace perftools
-
-namespace perftools {
-namespace gputools {
 namespace internal {
 
 // Platform-dependent interface class for the generic Events interface, in
@@ -243,6 +225,8 @@ class StreamExecutorInterface {
   virtual port::Status SetDeviceSharedMemoryConfig(
       SharedMemoryConfig config) = 0;
 
+  virtual int64 GetDeviceLoad() { return -1; }
+
   virtual bool DeviceMemoryUsage(int64 *free, int64 *total) const {
     return false;
   }
@@ -319,7 +303,7 @@ class StreamExecutorInterface {
   // Creates a new DnnSupport object, ownership is transferred to the caller.
   // If SupportsDnn() is false, this will always return null.
   //
-  // If SupportsDnn() is true, this may return null, for example, if the RNG
+  // If SupportsDnn() is true, this may return null, for example, if the DNN
   // initialization fails.
   virtual dnn::DnnSupport *CreateDnn() { return nullptr; }
 

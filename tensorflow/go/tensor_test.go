@@ -1,16 +1,18 @@
-// Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+Copyright 2016 The TensorFlow Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package tensorflow
 
@@ -40,6 +42,10 @@ func TestNewTensor(t *testing.T) {
 		{[]int64{2}, []bool{true, false}},
 		{[]int64{1}, []float64{1}},
 		{[]int64{1}, [1]float64{1}},
+		{[]int64{1, 1}, [1][1]float64{{1}}},
+		{[]int64{1, 1, 1}, [1][1][]float64{{{1}}}},
+		{[]int64{1, 1, 2}, [1][][2]float64{{{1, 2}}}},
+		{[]int64{1, 1, 1, 1}, [1][][1][]float64{{{{1}}}}},
 		{[]int64{2}, []string{"string", "slice"}},
 		{[]int64{2}, [2]string{"string", "array"}},
 		{[]int64{3, 2}, [][]float64{{1, 2}, {3, 4}, {5, 6}}},
@@ -72,6 +78,12 @@ func TestNewTensor(t *testing.T) {
 		[]uint64{5},
 		// Mismatched dimensions
 		[][]float32{{1, 2, 3}, {4}},
+		// Mismatched dimensions. Should return "mismatched slice lengths" error instead of "BUG"
+		[][][]float32{{{1, 2}, {3, 4}}, {{1}, {3}}},
+		// Mismatched dimensions. Should return error instead of valid tensor
+		[][][]float32{{{1, 2}, {3, 4}}, {{1}, {3}}, {{1, 2, 3}, {2, 3, 4}}},
+		// Mismatched dimensions for strings
+		[][]string{{"abc"}, {"abcd", "abcd"}},
 	}
 
 	for _, test := range tests {
