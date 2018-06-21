@@ -19,7 +19,8 @@ limitations under the License.
 #include "tensorflow/core/lib/db/sqlite.h"
 
 namespace tensorflow {
-namespace db {
+
+constexpr uint32 kTensorboardSqliteApplicationId = 0xfeedabee;
 
 /// \brief Creates TensorBoard SQLite tables and indexes.
 ///
@@ -27,7 +28,6 @@ namespace db {
 /// migrations are necessary, they will be performed with logging.
 Status SetupTensorboardSqliteDb(Sqlite* db);
 
-}  // namespace db
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CONTRIB_TENSORBOARD_DB_SCHEMA_H_

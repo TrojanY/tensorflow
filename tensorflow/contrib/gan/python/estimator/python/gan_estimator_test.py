@@ -38,6 +38,7 @@ from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import metrics as metrics_lib
 from tensorflow.python.ops import parsing_ops
 from tensorflow.python.platform import test
 from tensorflow.python.summary.writer import writer_cache
@@ -48,12 +49,14 @@ from tensorflow.python.training import training
 from tensorflow.python.training import training_util
 
 
-def generator_fn(noise_dict):
+def generator_fn(noise_dict, mode):
+  del mode
   noise = noise_dict['x']
   return layers.fully_connected(noise, noise.shape[1].value)
 
 
-def discriminator_fn(data, _):
+def discriminator_fn(data, unused_conditioning, mode):
+  del unused_conditioning, mode
   return layers.fully_connected(data, 1)
 
 
@@ -90,7 +93,6 @@ def mock_head(testcase, expected_generator_inputs, expected_real_data,
         generator_var_names,
         set([x.name for x in gan_model.generator_variables]))
     testcase.assertEqual(generator_scope_name, gan_model.generator_scope.name)
-    testcase.assertEqual(generator_fn, gan_model.generator_fn)
     testcase.assertEqual(_or_none(expected_real_data), gan_model.real_data)
     # TODO(joelshor): Add check on `discriminator_real_outputs`.
     # TODO(joelshor): Add check on `discriminator_gen_outputs`.
@@ -99,7 +101,6 @@ def mock_head(testcase, expected_generator_inputs, expected_real_data,
     else:
       testcase.assertEqual(discriminator_scope_name,
                            gan_model.discriminator_scope.name)
-    testcase.assertEqual(_or_none(discriminator_fn), gan_model.discriminator_fn)
 
     with ops.control_dependencies(assertions):
       if mode == model_fn_lib.ModeKeys.TRAIN:
@@ -194,6 +195,12 @@ class GANEstimatorIntegrationTest(test.TestCase):
       lr = learning_rate_decay.exponential_decay(1.0, gstep, 10, 0.9)
       return training.GradientDescentOptimizer(lr)
 
+    def get_metrics(gan_model):
+      return {
+          'mse_custom_metric': metrics_lib.mean_squared_error(
+              gan_model.real_data, gan_model.generated_data)
+      }
+
     gopt = make_opt if lr_decay else training.GradientDescentOptimizer(1.0)
     dopt = make_opt if lr_decay else training.GradientDescentOptimizer(1.0)
     est = estimator.GANEstimator(
@@ -203,6 +210,7 @@ class GANEstimatorIntegrationTest(test.TestCase):
         discriminator_loss_fn=losses.wasserstein_discriminator_loss,
         generator_optimizer=gopt,
         discriminator_optimizer=dopt,
+        get_eval_metric_ops_fn=get_metrics,
         model_dir=self._model_dir)
 
     # TRAIN
@@ -213,6 +221,9 @@ class GANEstimatorIntegrationTest(test.TestCase):
     scores = est.evaluate(eval_input_fn)
     self.assertEqual(num_steps, scores[ops.GraphKeys.GLOBAL_STEP])
     self.assertIn('loss', six.iterkeys(scores))
+    self.assertEqual(scores['discriminator_loss'] + scores['generator_loss'],
+                     scores['loss'])
+    self.assertIn('mse_custom_metric', six.iterkeys(scores))
 
     # PREDICT
     predictions = np.array([x for x in est.predict(predict_input_fn)])

@@ -21,18 +21,17 @@ Note: TensorFlow also includes a deprecated `Estimator` class at
 
 Estimators provide the following benefits:
 
-*   You can run Estimators-based models on a local host or on a
+*   You can run Estimator-based models on a local host or on a
     distributed multi-server environment without changing your model.
-    Furthermore, you can run Estimators-based models on CPUs, GPUs,
+    Furthermore, you can run Estimator-based models on CPUs, GPUs,
     or TPUs without recoding your model.
 *   Estimators simplify sharing implementations between model developers.
-*   You can develop a state of the art model with high-level intuitive code,
+*   You can develop a state of the art model with high-level intuitive code.
     In short, it is generally much easier to create models with Estimators
     than with the low-level TensorFlow APIs.
-*   Estimators are themselves built on tf.layers, which
+*   Estimators are themselves built on @{tf.layers}, which
     simplifies customization.
-*   Estimators build the graph for you.  In other words, you don't have to
-    build the graph.
+*   Estimators build the graph for you.
 *   Estimators provide a safe distributed training loop that controls how and
     when to:
     *   build the graph
@@ -57,7 +56,7 @@ the "plumbing" for you.  That is, pre-made Estimators create and manage
 pre-made Estimators let you experiment with different model architectures by
 making only minimal code changes.  @{tf.estimator.DNNClassifier$`DNNClassifier`},
 for example, is a pre-made Estimator class that trains classification models
-through dense, feed-forward neural networks.
+based on dense, feed-forward neural networks.
 
 
 ### Structure of a pre-made Estimators program
@@ -79,7 +78,7 @@ of the following four steps:
     an input function:
 
         def input_fn(dataset):
-           ...  # manipulate dataset, extracting feature names and the label
+           ...  # manipulate dataset, extracting the feature dict and the label
            return feature_dict, label
 
     (See @{$programmers_guide/datasets} for full details.)
@@ -96,13 +95,13 @@ of the following four steps:
         population = tf.feature_column.numeric_column('population')
         crime_rate = tf.feature_column.numeric_column('crime_rate')
         median_education = tf.feature_column.numeric_column('median_education',
-                            normalizer_fn='lambda x: x - global_education_mean')
+                            normalizer_fn=lambda x: x - global_education_mean)
 
 3.  **Instantiate the relevant pre-made Estimator.**  For example, here's
     a sample instantiation of a pre-made Estimator named `LinearClassifier`:
 
         # Instantiate an estimator, passing the feature columns.
-        estimator = tf.estimator.Estimator.LinearClassifier(
+        estimator = tf.estimator.LinearClassifier(
             feature_columns=[population, crime_rate, median_education],
             )
 
@@ -134,7 +133,7 @@ The heart of every Estimator--whether pre-made or custom--is its
 evaluation, and prediction. When you are using a pre-made Estimator,
 someone else has already implemented the model function. When relying
 on a custom Estimator, you must write the model function yourself. A
-@{$extend/estimators$companion document}
+@{$custom_estimators$companion document}
 explains how to write the model function.
 
 
@@ -166,11 +165,29 @@ keras_inception_v3 = tf.keras.applications.inception_v3.InceptionV3(weights=None
 keras_inception_v3.compile(optimizer=tf.keras.optimizers.SGD(lr=0.0001, momentum=0.9),
                           loss='categorical_crossentropy',
                           metric='accuracy')
-# Create an Estimator from the compiled Keras model.
+# Create an Estimator from the compiled Keras model. Note the initial model
+# state of the keras model is preserved in the created Estimator.
 est_inception_v3 = tf.keras.estimator.model_to_estimator(keras_model=keras_inception_v3)
-# Treat the derived Estimator as you would any other Estimator. For example,
-# the following derived Estimator calls the train method:
-est_inception_v3.train(input_fn=my_training_set, steps=2000)
+
+# Treat the derived Estimator as you would with any other Estimator.
+# First, recover the input name(s) of Keras model, so we can use them as the
+# feature column name(s) of the Estimator input function:
+keras_inception_v3.input_names  # print out: ['input_1']
+# Once we have the input name(s), we can create the input function, for example,
+# for input(s) in the format of numpy ndarray:
+train_input_fn = tf.estimator.inputs.numpy_input_fn(
+    x={"input_1": train_data},
+    y=train_labels,
+    num_epochs=1,
+    shuffle=False)
+# To train, we call Estimator's train function:
+est_inception_v3.train(input_fn=train_input_fn, steps=2000)
 ```
+Note that the names of feature columns and labels of a keras estimator come from
+the corresponding compiled keras model. For example, the input key names for
+`train_input_fn` above can be obtained from `keras_inception_v3.input_names`,
+and similarly, the predicted output names can be obtained from
+`keras_inception_v3.output_names`.
+
 For more details, please refer to the documentation for
 @{tf.keras.estimator.model_to_estimator}.

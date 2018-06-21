@@ -14,8 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/distributed_runtime/rpc/grpc_tensor_coding.h"
-#include "grpc++/support/byte_buffer.h"
-#include "grpc++/support/slice.h"
+#include "grpcpp/support/byte_buffer.h"
+#include "grpcpp/support/slice.h"
 #include "tensorflow/core/common_runtime/dma_helper.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor.pb.h"
@@ -214,22 +214,13 @@ void EncodeTensorToByteBuffer(bool is_dead, const Tensor& val,
 
     if (tensor_data_is_large) {
       // (E) Encode tensor data, but by sharing backing store
-
-      // TODO(vpai): Use the pure C++ ::grpc::Slice constructor that uses
-      // grpc_slice_new_with_user_data once TensorFlow pins a version of gRPC
-      // that includes https://github.com/grpc/grpc/pull/12065
-
       const TensorBuffer* buf = DMAHelper::buffer(&val);
       buf->Ref();
       slices[1] = ::grpc::Slice(
-          grpc_slice_new_with_user_data(
-              const_cast<void*>(static_cast<const void*>(tdata.data())),
-              tdata.size(),
-              [](void* backing) {
-                static_cast<TensorBuffer*>(backing)->Unref();
-              },
-              const_cast<TensorBuffer*>(buf)),
-          ::grpc::Slice::STEAL_REF);
+          const_cast<void*>(static_cast<const void*>(tdata.data())),
+          tdata.size(),
+          [](void* backing) { static_cast<TensorBuffer*>(backing)->Unref(); },
+          const_cast<TensorBuffer*>(buf));
       num_slices += 1;
     }
     size_t total_bytes = 0;

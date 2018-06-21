@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <vector>
 
+#include "tensorflow/compiler/xla/service/cpu/target_machine_features_fake.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
@@ -69,8 +70,10 @@ TEST_F(ConvCanonicalizationTest, NonCanonicalToCanonical) {
   ConvolutionDimensionNumbers dnums;
   dnums.set_input_batch_dimension(1);
   dnums.set_output_batch_dimension(1);
-  dnums.add_spatial_dimensions(2);
-  dnums.add_spatial_dimensions(3);
+  dnums.add_input_spatial_dimensions(2);
+  dnums.add_output_spatial_dimensions(2);
+  dnums.add_input_spatial_dimensions(3);
+  dnums.add_output_spatial_dimensions(3);
   dnums.set_input_feature_dimension(0);
   dnums.set_output_feature_dimension(0);
   dnums.add_kernel_spatial_dimensions(2);
@@ -87,7 +90,11 @@ TEST_F(ConvCanonicalizationTest, NonCanonicalToCanonical) {
   HloComputation* entry_computation =
       module->AddEntryComputation(builder.Build());
 
-  ConvCanonicalization conv_canonicalization;
+  cpu::TargetMachineFeaturesWithFakeAlignmentLogic target_machine_features(
+      [](int64 shape_size) {
+        return cpu::TargetMachineFeatures::kEigenExpectedTensorAlignment;
+      });
+  ConvCanonicalization conv_canonicalization(&target_machine_features);
   EXPECT_TRUE(conv_canonicalization.Run(module.get()).ValueOrDie());
 
   const HloInstruction* output_reshape = entry_computation->root_instruction();
@@ -125,8 +132,10 @@ TEST_F(ConvCanonicalizationTest, CanonicalStaysTheSame) {
   ConvolutionDimensionNumbers dnums;
   dnums.set_input_batch_dimension(0);
   dnums.set_output_batch_dimension(0);
-  dnums.add_spatial_dimensions(1);
-  dnums.add_spatial_dimensions(2);
+  dnums.add_input_spatial_dimensions(1);
+  dnums.add_output_spatial_dimensions(1);
+  dnums.add_input_spatial_dimensions(2);
+  dnums.add_output_spatial_dimensions(2);
   dnums.set_input_feature_dimension(3);
   dnums.set_output_feature_dimension(3);
   dnums.add_kernel_spatial_dimensions(0);
@@ -142,7 +151,11 @@ TEST_F(ConvCanonicalizationTest, CanonicalStaysTheSame) {
   auto module = CreateNewModule();
   module->AddEntryComputation(builder.Build());
 
-  ConvCanonicalization conv_canonicalization;
+  cpu::TargetMachineFeaturesWithFakeAlignmentLogic target_machine_features(
+      [](int64 shape_size) {
+        return cpu::TargetMachineFeatures::kEigenExpectedTensorAlignment;
+      });
+  ConvCanonicalization conv_canonicalization(&target_machine_features);
   EXPECT_FALSE(conv_canonicalization.Run(module.get()).ValueOrDie());
 }
 
