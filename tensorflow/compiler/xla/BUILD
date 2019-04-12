@@ -7,6 +7,7 @@ package_group(
     packages = [
         "//tensorflow/compiler/...",
         "//tensorflow/contrib/tpu/...",
+        "//third_party/py/jax/...",
     ],
 )
 
@@ -57,6 +58,24 @@ xla_proto_library(
 )
 
 cc_library(
+    name = "comparison_util",
+    srcs = [
+        "comparison_util.cc",
+    ],
+    hdrs = [
+        "comparison_util.h",
+    ],
+    visibility = [":friends"],
+    deps = [
+        ":statusor",
+        ":types",
+        ":util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_library(
     name = "execution_options_util",
     srcs = [
         "execution_options_util.cc",
@@ -67,7 +86,7 @@ cc_library(
     visibility = [":friends"],
     deps = [
         ":xla_proto",
-        "//tensorflow/compiler/xla/legacy_flags:debug_options_flags",
+        "//tensorflow/compiler/xla:debug_options_flags",
     ],
 )
 
@@ -108,11 +127,12 @@ cc_library(
     name = "status_macros",
     srcs = ["status_macros.cc"],
     hdrs = ["status_macros.h"],
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":statusor",
         ":types",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -142,30 +162,13 @@ cc_library(
 
 cc_library(
     name = "statusor",
-    srcs = ["statusor.cc"],
     hdrs = [
         "statusor.h",
-        "statusor_internals.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":status",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:lib_internal",
-    ],
-)
-
-tf_cc_test(
-    name = "statusor_test",
-    size = "small",
-    srcs = ["statusor_test.cc"],
-    deps = [
-        ":statusor",
-        ":test",
-        ":types",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/stream_executor/lib",
     ],
 )
 
@@ -175,7 +178,7 @@ cc_library(
     hdrs = [
         "iterator_util.h",
         "map_util.h",
-        "ptr_util.h",
+        "overflow_util.h",
         "util.h",
     ],
     visibility = ["//visibility:public"],
@@ -186,7 +189,11 @@ cc_library(
         ":types",
         ":xla_data_proto",
         "//tensorflow/core:lib",
-        "//tensorflow/core:ptr_util",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -203,6 +210,7 @@ cc_library(
         ":types",
         ":util",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -224,6 +232,7 @@ tf_cc_test(
         ":test",
         ":util",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -231,14 +240,18 @@ cc_library(
     name = "shape_util",
     srcs = [
         "index_util.cc",
+        "layout.cc",
         "layout_util.cc",
         "primitive_util.cc",
+        "shape.cc",
         "shape_util.cc",
     ],
     hdrs = [
         "index_util.h",
+        "layout.h",
         "layout_util.h",
         "primitive_util.h",
+        "shape.h",
         "shape_util.h",
     ],
     visibility = ["//visibility:public"],
@@ -250,10 +263,32 @@ cc_library(
         ":types",
         ":util",
         ":xla_data_proto",
-        "//tensorflow/core:framework_internal",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:regexp_internal",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+tf_cc_test(
+    name = "shape_test",
+    srcs = ["shape_test.cc"],
+    deps = [
+        ":shape_util",
+        ":status_macros",
+        ":test",
+        ":test_helpers",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/hash:hash_testing",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -268,6 +303,24 @@ tf_cc_test(
         ":types",
         ":util",
         ":xla_data_proto",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+tf_cc_test(
+    name = "primitive_util_test",
+    srcs = ["primitive_util_test.cc"],
+    deps = [
+        ":shape_util",
+        ":status_macros",
+        ":test",
+        ":test_helpers",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:lib",
         "//tensorflow/core:test_main",
     ],
 )
@@ -284,6 +337,22 @@ tf_cc_test(
 )
 
 tf_cc_test(
+    name = "layout_test",
+    srcs = ["layout_test.cc"],
+    deps = [
+        ":shape_util",
+        ":status_macros",
+        ":test",
+        ":test_helpers",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+tf_cc_test(
     name = "index_util_test",
     srcs = ["index_util_test.cc"],
     deps = [
@@ -295,9 +364,9 @@ tf_cc_test(
 )
 
 cc_library(
-    name = "literal_util",
-    srcs = ["literal_util.cc"],
-    hdrs = ["literal_util.h"],
+    name = "literal",
+    srcs = ["literal.cc"],
+    hdrs = ["literal.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":array2d",
@@ -310,23 +379,54 @@ cc_library(
         ":util",
         ":xla_data_proto",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
 tf_cc_test(
-    name = "literal_util_test",
-    srcs = ["literal_util_test.cc"],
+    name = "literal_test",
+    srcs = ["literal_test.cc"],
     deps = [
         ":array3d",
         ":array4d",
+        ":literal",
         ":literal_util",
         ":shape_util",
         ":test",
         ":types",
-        "//tensorflow/compiler/tf2xla:common",
         "//tensorflow/core:lib",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "literal_util",
+    srcs = ["literal_util.cc"],
+    hdrs = ["literal_util.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":array2d",
+        ":array3d",
+        ":array4d",
+        ":literal",
+        ":shape_util",
+        ":sparse_index_array",
+        ":status_macros",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:lib",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -341,9 +441,13 @@ cc_library(
     hdrs = ["literal_comparison.h"],
     deps = [
         ":error_spec",
+        ":literal",
         ":literal_util",
         ":util",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -355,6 +459,8 @@ cc_library(
     deps = [
         ":util",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -364,8 +470,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":types",
-        "//tensorflow/core:lib",
         "//tensorflow/core:stream_executor_no_cuda",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -376,6 +482,8 @@ cc_library(
         ":status",
         ":types",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -396,8 +504,9 @@ cc_library(
     deps = [
         ":array",
         ":types",
-        ":util",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -442,6 +551,8 @@ cc_library(
         ":array2d",
         ":types",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -453,6 +564,7 @@ tf_cc_test(
         ":test",
         "//tensorflow/core:lib",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -472,7 +584,7 @@ cc_library(
     hdrs = ["packed_literal_reader.h"],
     visibility = [":internal"],
     deps = [
-        ":literal_util",
+        ":literal",
         ":shape_util",
         ":status_macros",
         ":statusor",
@@ -480,6 +592,8 @@ cc_library(
         ":util",
         ":xla_data_proto",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -494,6 +608,7 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:regexp_internal",
         "//tensorflow/core:test",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -503,15 +618,18 @@ cc_library(
     hdrs = ["text_literal_reader.h"],
     visibility = [":internal"],
     deps = [
-        ":literal_util",
+        ":literal",
         ":shape_util",
         ":status_macros",
         ":statusor",
         ":types",
         ":util",
         ":xla_data_proto",
+        "//tensorflow/compiler/xla/service:hlo_parser",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -519,7 +637,7 @@ tf_cc_test(
     name = "text_literal_reader_test",
     srcs = ["text_literal_reader_test.cc"],
     deps = [
-        ":literal_util",
+        ":literal",
         ":shape_util",
         ":test",
         ":text_literal_reader",
@@ -536,12 +654,14 @@ cc_library(
     hdrs = ["text_literal_writer.h"],
     visibility = [":internal"],
     deps = [
-        ":literal_util",
+        ":literal",
         ":shape_util",
         ":status_macros",
         ":types",
         ":xla_data_proto",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -549,6 +669,7 @@ tf_cc_test(
     name = "text_literal_writer_test",
     srcs = ["text_literal_writer_test.cc"],
     deps = [
+        ":literal",
         ":literal_util",
         ":test",
         ":test_helpers",
@@ -566,10 +687,12 @@ cc_library(
     deps = [
         ":shape_util",
         ":status_macros",
-        ":util",
         ":xla_data_proto",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -583,6 +706,7 @@ tf_cc_test(
         ":xla_data_proto",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -609,6 +733,9 @@ cc_library(
         ":types",
         ":xla_data_proto",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -621,16 +748,19 @@ cc_library(
         ":array2d",
         ":array3d",
         ":array4d",
+        ":literal_util",
         ":util",
         ":window_util",
         ":xla_data_proto",
         "//tensorflow/compiler/xla/client:padding",
-        "//tensorflow/compiler/xla/client/xla_client:xla_builder",
+        "//tensorflow/compiler/xla/client:xla_builder",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_evaluator",
         "//tensorflow/compiler/xla/service:shape_inference",
-        "//tensorflow/compiler/xla/service/cpu:runtime_single_threaded_matmul",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -641,7 +771,7 @@ tf_cc_test(
         ":array2d",
         ":array3d",
         ":array4d",
-        ":literal_util",
+        ":literal",
         ":reference_util",
         ":test",
         ":util",
@@ -649,6 +779,7 @@ tf_cc_test(
         "//tensorflow/compiler/xla/client:padding",
         "//tensorflow/compiler/xla/tests:literal_test_util",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -660,7 +791,8 @@ cc_library(
         ":array2d",
         ":shape_util",
         ":xla_data_proto",
-        "//tensorflow/core:lib",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -672,6 +804,81 @@ tf_cc_test(
         ":test",
         "//tensorflow/core:test_main",
     ],
+)
+
+cc_library(
+    name = "parse_flags_from_env",
+    srcs = ["parse_flags_from_env.cc"],
+    hdrs = ["parse_flags_from_env.h"],
+    deps =
+        [
+            "//tensorflow/compiler/xla:types",
+            "//tensorflow/core:framework_internal",
+            "//tensorflow/core:lib",
+            "@com_google_absl//absl/strings",
+            "@com_google_absl//absl/strings:str_format",
+            "@com_google_absl//absl/types:span",
+        ],
+)
+
+tf_cc_test(
+    name = "parse_flags_from_env_test",
+    srcs = ["parse_flags_from_env_test.cc"],
+    deps =
+        [
+            ":parse_flags_from_env",
+            "//tensorflow/compiler/xla:types",
+            "//tensorflow/core:framework_internal",
+            "//tensorflow/core:lib",
+            "//tensorflow/core:test",
+            "@com_google_absl//absl/strings:str_format",
+        ],
+)
+
+cc_library(
+    name = "debug_options_flags",
+    srcs = [
+        "debug_options_flags.cc",
+        "debug_options_parsers.h",
+    ],
+    hdrs = ["debug_options_flags.h"],
+    visibility = [":friends"],
+    deps =
+        [
+            ":parse_flags_from_env",
+            ":status",
+            "//tensorflow/compiler/xla:xla_proto",
+            "//tensorflow/compiler/xla/service:hlo",
+            "//tensorflow/core:framework_internal",
+            "@com_google_absl//absl/strings",
+        ],
+)
+
+cc_library(
+    name = "cpu_function_runtime",
+    srcs = ["cpu_function_runtime.cc"],
+    hdrs = ["cpu_function_runtime.h"],
+    visibility = [":friends"],
+    deps = ["//tensorflow/core:framework_lite"],
+)
+
+tf_cc_test(
+    name = "debug_options_parsers_test",
+    size = "small",
+    srcs = [
+        "debug_options_parsers.h",
+        "debug_options_parsers_test.cc",
+    ],
+    deps =
+        [
+            "//tensorflow/compiler/xla:xla_proto",
+            "//tensorflow/compiler/xla/service:hlo",
+            "//tensorflow/core:framework_internal",
+            "//tensorflow/core:lib",
+            "//tensorflow/core:test",
+            "@com_google_absl//absl/strings",
+            "@com_google_absl//absl/strings:str_format",
+        ],
 )
 
 # -----------------------------------------------------------------------------

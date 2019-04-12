@@ -168,11 +168,11 @@ class CholeskyOuterProduct(bijector.Bijector):
           [is_matrix, is_square, is_positive_definite], x)
 
     # Create a vector equal to: [p, p-1, ..., 2, 1].
-    if x.get_shape().ndims is None or x.get_shape()[-1].value is None:
+    if x.get_shape().ndims is None or x.get_shape().dims[-1].value is None:
       p_int = array_ops.shape(x)[-1]
       p_float = math_ops.cast(p_int, dtype=x.dtype)
     else:
-      p_int = x.get_shape()[-1].value
+      p_int = x.get_shape().dims[-1].value
       p_float = np.array(p_int, dtype=x.dtype.as_numpy_dtype)
     exponents = math_ops.linspace(p_float, 1., p_int)
 
@@ -182,7 +182,20 @@ class CholeskyOuterProduct(bijector.Bijector):
         axis=-1)
     fldj = p_float * np.log(2.) + sum_weighted_log_diag
 
-    return fldj
+    # We finally need to undo adding an extra column in non-scalar cases
+    # where there is a single matrix as input.
+    if x.get_shape().ndims is not None:
+      if x.get_shape().ndims == 2:
+        fldj = array_ops.squeeze(fldj, axis=-1)
+      return fldj
+
+    shape = array_ops.shape(fldj)
+    maybe_squeeze_shape = array_ops.concat([
+        shape[:-1],
+        distribution_util.pick_vector(
+            math_ops.equal(array_ops.rank(x), 2),
+            np.array([], dtype=np.int32), shape[-1:])], 0)
+    return array_ops.reshape(fldj, maybe_squeeze_shape)
 
   def _make_columnar(self, x):
     """Ensures non-scalar input has at least one column.

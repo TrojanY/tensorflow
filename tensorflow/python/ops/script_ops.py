@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Script Language Operators. See the @{$python/script_ops} guide."""
+"""Script Language Operators."""
 
 # pylint: disable=g-bad-name
 from __future__ import absolute_import
@@ -34,9 +34,11 @@ from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import function
 from tensorflow.python.framework import ops
+from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_script_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.util import compat
+from tensorflow.python.util import deprecation
 from tensorflow.python.util import nest
 from tensorflow.python.util.tf_export import tf_export
 
@@ -61,6 +63,8 @@ class EagerFunc(object):
     self._func = func
     self._out_dtypes = Tout
     self._is_grad_func = is_grad_func
+
+    context.ensure_initialized()
 
   def _convert(self, value, dtype):
     """Converts `value` to a tensor of type `dtype`, with error checking.
@@ -96,28 +100,27 @@ class EagerFunc(object):
       return constant_op.constant(0.0, dtype=dtype)
     return ops.convert_to_tensor(value, dtype=dtype)
 
-  def __call__(self, on_gpu, token, args):
+  def __call__(self, device, token, args):
     """Passes `args` to `self._func`, which is executed eagerly."""
 
-    with context.eager_mode():
-      with backprop.GradientTape() as tape:
-        for tensor in args:
-          tape.watch(tensor)
-        ret = self._func(*args)
-        # NB: The tape needs to watch copies across devices.
-        maybe_copy_to_gpu = lambda x: x if not on_gpu else x.gpu()
+    with context.eager_mode(), backprop.GradientTape() as tape:
+      for tensor in args:
+        tape.watch(tensor)
+      ret = self._func(*args)
+      # Use tf.identity to copy the returned tensors to device if neccesary.
+      with ops.device(device):
         if isinstance(ret, (tuple, list)):
           outputs = [
-              maybe_copy_to_gpu(self._convert(x, dtype=dtype))
+              array_ops.identity(self._convert(x, dtype=dtype))
               for (x, dtype) in zip(ret, self._out_dtypes)
           ]
         elif ret is None:
           outputs = None
         else:
-          outputs = maybe_copy_to_gpu(
+          outputs = array_ops.identity(
               self._convert(ret, dtype=self._out_dtypes[0]))
-      tape_cache[compat.as_bytes(token)] = (tape, args, outputs)
-      return outputs
+    tape_cache[compat.as_bytes(token)] = (tape, args, outputs)
+    return outputs
 
 
 class FuncRegistry(object):
@@ -130,7 +133,7 @@ class FuncRegistry(object):
   def __init__(self):
     self._lock = threading.Lock()
     self._unique_id = 0  # GUARDED_BY(self._lock)
-    # Only store weakrefs to the funtions. The strong reference is stored in
+    # Only store weakrefs to the functions. The strong reference is stored in
     # the graph.
     self._funcs = weakref.WeakValueDictionary()
 
@@ -174,14 +177,14 @@ class FuncRegistry(object):
     else:
       return result
 
-  def __call__(self, token, on_gpu, args):
+  def __call__(self, token, device, args):
     """Calls the registered function for `token` with args.
 
     Args:
       token: A key into this `FuncRegistry` identifying which function to call.
-      on_gpu: A boolean indicating whether or not `token`'s corresponding
-        operation was placed on GPU; only used if the function registered for
-        `token` is an `EagerPyFunc`.
+      device: Name of the device on which outputs of `token`'s corresponding
+        operation should be placed. Used iff the function registered for `token`
+        is an EagerPyFunc.
       args: The arguments to pass to the function registered for `token`.
 
     Returns:
@@ -201,7 +204,7 @@ class FuncRegistry(object):
       # or if the graph is being driven by concurrent session.run() calls.
       #
       # TODO(akshayka): Key the tape cache in a thread-safe way.
-      return func(on_gpu, token, args)
+      return func(device, token, args)
     else:
       ret = func(*args)
       # Strings seem to lead to a memory leak here if they're not wrapped in a
@@ -232,8 +235,13 @@ _py_funcs = FuncRegistry()
 pywrap_tensorflow.InitializePyTrampoline(_py_funcs)
 
 
-def _internal_py_func(func, inp, Tout, stateful=None, eager=False,
-                      is_grad_func=False, name=None):
+def _internal_py_func(func,
+                      inp,
+                      Tout,
+                      stateful=None,
+                      eager=False,
+                      is_grad_func=False,
+                      name=None):
   """See documentation for py_func and eager_py_func."""
 
   is_list_or_tuple = False
@@ -282,33 +290,35 @@ def _internal_py_func(func, inp, Tout, stateful=None, eager=False,
 
 # TODO(akshayka): Implement higher-order derivatives.
 @ops.RegisterGradient("EagerPyFunc")
-def _EagerPyFuncGrad(op, dy):
+def _EagerPyFuncGrad(op, *dy):
   """Computes the gradient of an EagerPyFunc."""
 
   token = op.get_attr("token")
 
-  def eagerly_executed_grad(dy):
+  def eagerly_executed_grad(*dy):
     tape, eager_inputs, eager_outputs = tape_cache.pop(compat.as_bytes(token))
     return tape.gradient(eager_outputs, eager_inputs, output_gradients=dy)
 
   with ops.control_dependencies(op.outputs):
     return _internal_py_func(
         func=eagerly_executed_grad,
-        inp=[dy] if isinstance(dy, ops.Tensor) else dy,
+        inp=dy,
         Tout=[tensor.dtype for tensor in op.inputs],
-        eager=True, is_grad_func=True)
+        eager=True,
+        is_grad_func=True)
 
 
+@tf_export("py_function")
 def eager_py_func(func, inp, Tout, name=None):
   """Wraps a python function into a TensorFlow op that executes it eagerly.
 
   This function allows expressing computations in a TensorFlow graph as
   Python functions. In particular, it wraps a Python function `func`
   in a once-differentiable TensorFlow operation that executes it with eager
-  exeuction enabled. As a consequence, `tf.contrib.eager.py_func` makes it
+  execution enabled. As a consequence, `tf.py_function` makes it
   possible to express control flow using Python constructs (`if`, `while`,
-  `for`, etc.), instead of TensorFlow control flow constructs (@{tf.cond},
-  @{tf.while_loop}). For example, you might use `tf.contrib.eager.py_func` to
+  `for`, etc.), instead of TensorFlow control flow constructs (`tf.cond`,
+  `tf.while_loop`). For example, you might use `tf.py_function` to
   implement the log huber function:
 
   ```python
@@ -321,7 +331,7 @@ def eager_py_func(func, inp, Tout, name=None):
   x = tf.placeholder(tf.float32)
   m = tf.placeholder(tf.float32)
 
-  y = tf.contrib.eager.py_func(func=log_huber, inp=[x, m], Tout=tf.float32)
+  y = tf.py_function(func=log_huber, inp=[x, m], Tout=tf.float32)
   dy_dx = tf.gradients(y, x)[0]
 
   with tf.Session() as sess:
@@ -331,23 +341,24 @@ def eager_py_func(func, inp, Tout, name=None):
     y, dy_dx = sess.run([y, dy_dx], feed_dict={x: 1.0, m: 2.0})
   ```
 
-  You can also use `tf.contrib.eager.py_func` to debug your models at runtime
+  You can also use `tf.py_function` to debug your models at runtime
   using Python tools, i.e., you can isolate portions of your code that
   you want to debug, wrap them in Python functions and insert `pdb` tracepoints
   or print statements as desired, and wrap those functions in
-  `tf.contrib.eager.py_func`.
+  `tf.py_function`.
 
-  For more information on eager execution, see @{$programmers_guide/eager}.
+  For more information on eager execution, see the
+  [Eager guide](https://tensorflow.org/guide/eager).
 
-  `tf.contrib.eager.py_func` is similar in spirit to @{tf.py_func}, but unlike
+  `tf.py_function` is similar in spirit to `tf.py_func`, but unlike
   the latter, the former lets you use TensorFlow operations in the wrapped
-  Python function. In particular, while @{tf.py_func} only runs on CPUs and
+  Python function. In particular, while `tf.py_func` only runs on CPUs and
   wraps functions that take NumPy arrays as inputs and return NumPy arrays as
-  outputs, `tf.contrib.eager.py_func` can be placed on GPUs and wraps functions
+  outputs, `tf.py_function` can be placed on GPUs and wraps functions
   that take Tensors as inputs, execute TensorFlow operations in their bodies,
   and return Tensors as outputs.
 
-  Like @{tf.py_func}, `tf.contrib.eager.py_func` has the following limitations
+  Like `tf.py_func`, `tf.py_function` has the following limitations
   with respect to serialization and distribution:
 
   * The body of the function (i.e. `func`) will not be serialized in a
@@ -355,9 +366,9 @@ def eager_py_func(func, inp, Tout, name=None):
     serialize your model and restore it in a different environment.
 
   * The operation must run in the same address space as the Python program
-    that calls `tf.contrib.eager.py_func()`. If you are using distributed
+    that calls `tf.py_function()`. If you are using distributed
     TensorFlow, you must run a `tf.train.Server` in the same process as the
-    program that calls `tf.contrib.eager.py_func()` and you must pin the created
+    program that calls `tf.py_function()` and you must pin the created
     operation to a device in that server (e.g. using `with tf.device():`).
 
 
@@ -380,8 +391,7 @@ def eager_py_func(func, inp, Tout, name=None):
   return _internal_py_func(func=func, inp=inp, Tout=Tout, eager=True, name=name)
 
 
-@tf_export("py_func")
-def py_func(func, inp, Tout, stateful=True, name=None):
+def py_func_common(func, inp, Tout, stateful=True, name=None):
   """Wraps a python function and uses it as a TensorFlow op.
 
   Given a python function `func`, which takes numpy arrays as its
@@ -448,6 +458,36 @@ def py_func(func, inp, Tout, stateful=True, name=None):
 
   return _internal_py_func(
       func=func, inp=inp, Tout=Tout, stateful=stateful, eager=False, name=name)
+
+
+@deprecation.deprecated(
+    date=None,
+    instructions="""tf.py_func is deprecated in TF V2. Instead, there are two
+    options available in V2.
+    - tf.py_function takes a python function which manipulates tf eager
+    tensors instead of numpy arrays. It's easy to convert a tf eager tensor to
+    an ndarray (just call tensor.numpy()) but having access to eager tensors
+    means `tf.py_function`s can use accelerators such as GPUs as well as
+    being differentiable using a gradient tape.
+    - tf.numpy_function maintains the semantics of the deprecated tf.py_func
+    (it is not differentiable, and manipulates numpy arrays). It drops the
+    stateful argument making all functions stateful.
+    """)
+@tf_export(v1=["py_func"])
+def py_func(func, inp, Tout, stateful=True, name=None):
+  return py_func_common(func, inp, Tout, stateful, name=name)
+
+
+py_func.__doc__ = "%s" % py_func_common.__doc__
+
+
+@tf_export("numpy_function")
+def numpy_function(func, inp, Tout, name=None):
+  return py_func_common(func, inp, Tout, stateful=True, name=name)
+
+
+numpy_function.__doc__ = py_func_common.__doc__.replace("py_func",
+                                                        "numpy_function")
 
 
 ops.NotDifferentiable("PyFunc")

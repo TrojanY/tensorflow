@@ -16,6 +16,8 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_DISTRIBUTED_RUNTIME_RPC_GRPC_SERVER_LIB_H_
 #define TENSORFLOW_CORE_DISTRIBUTED_RUNTIME_RPC_GRPC_SERVER_LIB_H_
 
+// GrpcServer manages the lifecycle of an Eager, Worker and Master service.
+
 #include <memory>
 
 #include "grpcpp/grpcpp.h"
@@ -26,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/distributed_runtime/master_env.h"
 #include "tensorflow/core/distributed_runtime/rpc/async_service_interface.h"
 #include "tensorflow/core/distributed_runtime/rpc/grpc_channel.h"
+#include "tensorflow/core/distributed_runtime/rpc/grpc_worker_service.h"
 #include "tensorflow/core/distributed_runtime/server_lib.h"
 #include "tensorflow/core/distributed_runtime/session_mgr.h"
 #include "tensorflow/core/distributed_runtime/worker_env.h"
@@ -53,16 +56,31 @@ typedef std::function<void(const WorkerEnv*, ::grpc::ServerBuilder*)>
     ServiceInitFunction;
 
 // function that creates a grpc based worker implementation.
-typedef std::function<std::unique_ptr<GrpcWorker>(WorkerEnv*)>
+typedef std::function<std::unique_ptr<GrpcWorker>(WorkerEnv*,
+                                                  const ConfigProto& config)>
     WorkerCreationFunction;
+
+struct GrpcServerOptions {
+  ServiceInitFunction service_func = nullptr;
+  RendezvousMgrCreationFunction rendezvous_mgr_func = nullptr;
+  CollectiveMgrCreationFunction collective_mgr_func = nullptr;
+  WorkerCreationFunction worker_func = nullptr;
+  StatsPublisherFactory stats_factory = CreateNoOpStatsPublisher;
+  GrpcWorkerServiceOptions worker_service_options;
+};
 
 class GrpcServer : public ServerInterface {
  protected:
   GrpcServer(const ServerDef& server_def, Env* env);
+  // Allow children classes to override this and provide custom args to the
+  // server before it is constructed. Default behavior is to do nothing.
+  virtual void MaybeMutateBuilder(::grpc::ServerBuilder* builder);
 
  public:
   static Status Create(const ServerDef& server_def, Env* env,
                        std::unique_ptr<ServerInterface>* out_server);
+  static Status Create(const ServerDef& server_def, Env* env,
+                       std::unique_ptr<GrpcServer>* out_server);
 
   // Destruction is only supported in the factory method. Clean
   // shutdown is not currently implemented for this server type.
@@ -74,26 +92,13 @@ class GrpcServer : public ServerInterface {
   Status Join() override;
   const string target() const override;
 
+  WorkerEnv* worker_env() { return &worker_env_; }
+  MasterEnv* master_env() { return &master_env_; }
+
+  std::shared_ptr<GrpcChannelCache> channel_cache() { return channel_cache_; }
+
  protected:
-  Status Init(ServiceInitFunction service_func,
-              const RendezvousMgrCreationFunction& rendezvous_mgr_func,
-              const CollectiveMgrCreationFunction& collective_mgr_func,
-              const WorkerCreationFunction& worker_func,
-              const StatsPublisherFactory& stats_factory);
-
-  Status Init(ServiceInitFunction service_func,
-              const RendezvousMgrCreationFunction& rendezvous_mgr_func,
-              const CollectiveMgrCreationFunction& collective_mgr_func,
-              const WorkerCreationFunction& worker_func);
-
-  Status Init(ServiceInitFunction service_func,
-              const RendezvousMgrCreationFunction& rendezvous_mgr_func,
-              const CollectiveMgrCreationFunction& collective_mgr_func);
-    
-  Status Init(ServiceInitFunction service_func,
-              const RendezvousMgrCreationFunction& rendezvous_mgr_func);
-
-  Status Init();
+  Status Init(const GrpcServerOptions& opts = GrpcServerOptions());
 
   // A subclass can override this method to support secure credentials.
   virtual std::shared_ptr<::grpc::ServerCredentials> GetServerCredentials(
@@ -114,11 +119,6 @@ class GrpcServer : public ServerInterface {
   // Returns the port to which this server is bound.
   // This method may only be called after `this->Init()` returns successfully.
   int bound_port() const { return bound_port_; }
-
-  WorkerEnv* worker_env() { return &worker_env_; }
-  MasterEnv* master_env() { return &master_env_; }
-
-  std::shared_ptr<GrpcChannelCache> channel_cache() { return channel_cache_; }
 
   const ServerDef& server_def() const { return server_def_; }
 
@@ -157,6 +157,11 @@ class GrpcServer : public ServerInterface {
   std::unique_ptr<GrpcWorker> worker_impl_;
   AsyncServiceInterface* worker_service_ = nullptr;
   std::unique_ptr<Thread> worker_thread_ GUARDED_BY(mu_);
+
+  // TensorFlow Eager implementation, and RPC polling thread.
+  AsyncServiceInterface* eager_service_ = nullptr;
+  std::unique_ptr<Thread> eager_thread_ GUARDED_BY(mu_);
+  std::shared_ptr<WorkerSession> worker_session_;
 
   std::unique_ptr<::grpc::Server> server_ GUARDED_BY(mu_);
 };

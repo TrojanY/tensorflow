@@ -20,15 +20,16 @@ from __future__ import print_function
 
 # Generic layers.
 # pylint: disable=g-bad-import-order
-from tensorflow.python.keras.engine import Input
-from tensorflow.python.keras.engine import InputLayer
-from tensorflow.python.keras.engine import InputSpec
-from tensorflow.python.keras.engine import Layer
+from tensorflow.python.keras.engine.input_layer import Input
+from tensorflow.python.keras.engine.input_layer import InputLayer
+from tensorflow.python.keras.engine.input_spec import InputSpec
+from tensorflow.python.keras.engine.base_layer import Layer
 
 # Advanced activations.
 from tensorflow.python.keras.layers.advanced_activations import LeakyReLU
 from tensorflow.python.keras.layers.advanced_activations import PReLU
 from tensorflow.python.keras.layers.advanced_activations import ELU
+from tensorflow.python.keras.layers.advanced_activations import ReLU
 from tensorflow.python.keras.layers.advanced_activations import ThresholdedReLU
 from tensorflow.python.keras.layers.advanced_activations import Softmax
 
@@ -77,6 +78,9 @@ from tensorflow.python.keras.layers.core import Lambda
 from tensorflow.python.keras.layers.core import Dense
 from tensorflow.python.keras.layers.core import ActivityRegularization
 
+# Dense Attention layers.
+from tensorflow.python.keras.layers.dense_attention import Attention
+
 # Embedding layers.
 from tensorflow.python.keras.layers.embeddings import Embedding
 
@@ -108,7 +112,12 @@ from tensorflow.python.keras.layers.noise import GaussianNoise
 from tensorflow.python.keras.layers.noise import GaussianDropout
 
 # Normalization layers.
+from tensorflow.python.keras.layers.normalization import LayerNormalization
 from tensorflow.python.keras.layers.normalization import BatchNormalization
+from tensorflow.python.keras.layers.normalization_v2 import BatchNormalization as BatchNormalizationV2
+
+# Kernelized layers.
+from tensorflow.python.keras.layers.kernelized import RandomFourierFeatures
 
 # Pooling layers.
 from tensorflow.python.keras.layers.pooling import MaxPooling1D
@@ -140,13 +149,20 @@ from tensorflow.python.keras.layers.pooling import GlobalMaxPool3D
 
 # Recurrent layers.
 from tensorflow.python.keras.layers.recurrent import RNN
+from tensorflow.python.keras.layers.recurrent import AbstractRNNCell
 from tensorflow.python.keras.layers.recurrent import StackedRNNCells
 from tensorflow.python.keras.layers.recurrent import SimpleRNNCell
-from tensorflow.python.keras.layers.recurrent import GRUCell
-from tensorflow.python.keras.layers.recurrent import LSTMCell
+from tensorflow.python.keras.layers.recurrent import PeepholeLSTMCell
 from tensorflow.python.keras.layers.recurrent import SimpleRNN
+
 from tensorflow.python.keras.layers.recurrent import GRU
+from tensorflow.python.keras.layers.recurrent import GRUCell
 from tensorflow.python.keras.layers.recurrent import LSTM
+from tensorflow.python.keras.layers.recurrent import LSTMCell
+from tensorflow.python.keras.layers.recurrent_v2 import GRU as GRU_v2
+from tensorflow.python.keras.layers.recurrent_v2 import GRUCell as GRUCell_v2
+from tensorflow.python.keras.layers.recurrent_v2 import LSTM as LSTM_v2
+from tensorflow.python.keras.layers.recurrent_v2 import LSTMCell as LSTMCell_v2
 
 # Convolutional-recurrent layers.
 from tensorflow.python.keras.layers.convolutional_recurrent import ConvLSTM2D

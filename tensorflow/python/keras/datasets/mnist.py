@@ -21,10 +21,10 @@ from __future__ import print_function
 import numpy as np
 
 from tensorflow.python.keras.utils.data_utils import get_file
-from tensorflow.python.util.tf_export import tf_export
+from tensorflow.python.util.tf_export import keras_export
 
 
-@tf_export('keras.datasets.mnist.load_data')
+@keras_export('keras.datasets.mnist.load_data')
 def load_data(path='mnist.npz'):
   """Loads the MNIST dataset.
 
@@ -47,8 +47,8 @@ def load_data(path='mnist.npz'):
       path,
       origin=origin_folder + 'mnist.npz',
       file_hash='8a61469f7ea1b51cbae51d4f78837e45')
-  f = np.load(path)
-  x_train, y_train = f['x_train'], f['y_train']
-  x_test, y_test = f['x_test'], f['y_test']
-  f.close()
-  return (x_train, y_train), (x_test, y_test)
+  with np.load(path) as f:
+    x_train, y_train = f['x_train'], f['y_train']
+    x_test, y_test = f['x_test'], f['y_test']
+
+    return (x_train, y_train), (x_test, y_test)

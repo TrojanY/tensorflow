@@ -24,35 +24,33 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <IOKit/kext/KextManager.h>
+#include <mach-o/dyld.h>
+#else
 #if !defined(PLATFORM_WINDOWS)
 #include <link.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 #endif
 #include <sys/stat.h>
+#endif
 #include <algorithm>
 #include <memory>
 #include <vector>
 
-#include "tensorflow/stream_executor/lib/process_state.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/strings/str_cat.h"
 #include "tensorflow/stream_executor/lib/error.h"
+#include "tensorflow/stream_executor/lib/numbers.h"
+#include "tensorflow/stream_executor/lib/process_state.h"
 #include "tensorflow/stream_executor/lib/status.h"
 #include "tensorflow/stream_executor/lib/str_util.h"
-#include "tensorflow/stream_executor/lib/strcat.h"
-#include "tensorflow/stream_executor/lib/stringpiece.h"
 #include "tensorflow/stream_executor/lib/stringprintf.h"
 #include "tensorflow/stream_executor/platform/logging.h"
-#include "tensorflow/stream_executor/lib/numbers.h"
-#include "tensorflow/stream_executor/lib/str_util.h"
-#include "tensorflow/stream_executor/lib/inlined_vector.h"
 
 namespace stream_executor {
 namespace cuda {
-
-#if !defined(PLATFORM_WINDOWS)
-static const char *kDriverVersionPath = "/proc/driver/nvidia/version";
-#endif
-
 
 string DriverVersionToString(DriverVersion version) {
   return port::Printf("%d.%d.%d", std::get<0>(version), std::get<1>(version), std::get<2>(version));
@@ -107,14 +105,50 @@ port::StatusOr<DriverVersion> StringToDriverVersion(const string &value) {
   return result;
 }
 
+}  // namespace cuda
+}  // namespace stream_executor
+
+namespace stream_executor {
+namespace gpu {
+
+#ifdef __APPLE__
+static const CFStringRef kDriverKextIdentifier = CFSTR("com.nvidia.CUDA");
+#elif !defined(PLATFORM_WINDOWS)
+static const char *kDriverVersionPath = "/proc/driver/nvidia/version";
+#endif
+
 // -- class Diagnostician
 
 string Diagnostician::GetDevNodePath(int dev_node_ordinal) {
-  return port::StrCat("/dev/nvidia", dev_node_ordinal);
+  return absl::StrCat("/dev/nvidia", dev_node_ordinal);
 }
 
 void Diagnostician::LogDiagnosticInformation() {
-#if !defined(PLATFORM_WINDOWS)
+#ifdef __APPLE__
+  CFStringRef kext_ids[1];
+  kext_ids[0] = kDriverKextIdentifier;
+  CFArrayRef kext_id_query = CFArrayCreate(nullptr, (const void **)kext_ids, 1,
+                                           &kCFTypeArrayCallBacks);
+  CFDictionaryRef kext_infos =
+      KextManagerCopyLoadedKextInfo(kext_id_query, nullptr);
+  CFRelease(kext_id_query);
+
+  CFDictionaryRef cuda_driver_info = nullptr;
+  if (CFDictionaryGetValueIfPresent(kext_infos, kDriverKextIdentifier,
+                                    (const void **)&cuda_driver_info)) {
+    bool started = CFBooleanGetValue((CFBooleanRef)CFDictionaryGetValue(
+        cuda_driver_info, CFSTR("OSBundleStarted")));
+    if (!started) {
+      LOG(INFO) << "kernel driver is installed, but does not appear to be "
+                   "running on this host "
+                << "(" << port::Hostname() << ")";
+    }
+  } else {
+    LOG(INFO) << "kernel driver does not appear to be installed on this host "
+              << "(" << port::Hostname() << ")";
+  }
+  CFRelease(kext_infos);
+#elif !defined(PLATFORM_WINDOWS)
   if (access(kDriverVersionPath, F_OK) != 0) {
     LOG(INFO) << "kernel driver does not appear to be running on this host "
               << "(" << port::Hostname() << "): "
@@ -161,14 +195,15 @@ void Diagnostician::LogDiagnosticInformation() {
   }
   port::StatusOr<DriverVersion> dso_version = FindDsoVersion();
   LOG(INFO) << "libcuda reported version is: "
-            << DriverVersionStatusToString(dso_version);
+            << cuda::DriverVersionStatusToString(dso_version);
 
   port::StatusOr<DriverVersion> kernel_version = FindKernelDriverVersion();
   LOG(INFO) << "kernel reported version is: "
-	  << DriverVersionStatusToString(kernel_version);
+            << cuda::DriverVersionStatusToString(kernel_version);
 #endif
 
-#if !defined(PLATFORM_WINDOWS)
+  // OS X kernel driver does not report version accurately
+#if !defined(__APPLE__) && !defined(PLATFORM_WINDOWS)
   if (kernel_version.ok() && dso_version.ok()) {
     WarnOnDsoKernelMismatch(dso_version, kernel_version);
   }
@@ -182,6 +217,29 @@ port::StatusOr<DriverVersion> Diagnostician::FindDsoVersion() {
       port::error::NOT_FOUND,
       "was unable to find libcuda.so DSO loaded into this program"));
 
+#if defined(__APPLE__)
+  // OSX CUDA libraries have names like: libcuda_310.41.15_mercury.dylib
+  const string prefix("libcuda_");
+  const string suffix("_mercury.dylib");
+  for (uint32_t image_index = 0; image_index < _dyld_image_count();
+       ++image_index) {
+    const string path(_dyld_get_image_name(image_index));
+    const size_t suffix_pos = path.rfind(suffix);
+    const size_t prefix_pos = path.rfind(prefix, suffix_pos);
+    if (prefix_pos == string::npos || suffix_pos == string::npos) {
+      // no match
+      continue;
+    }
+    const size_t start = prefix_pos + prefix.size();
+    if (start >= suffix_pos) {
+      // version not included
+      continue;
+    }
+    const size_t length = suffix_pos - start;
+    const string version = path.substr(start, length);
+    result = cuda::StringToDriverVersion(version);
+  }
+#else
 #if !defined(PLATFORM_WINDOWS) && !defined(ANDROID_TEGRA)
   // Callback used when iterating through DSOs. Looks for the driver-interfacing
   // DSO and yields its version number into the callback data, when found.
@@ -207,13 +265,14 @@ port::StatusOr<DriverVersion> Diagnostician::FindDsoVersion() {
       // TODO(b/22689637): Eliminate the explicit namespace if possible.
       auto stripped_dso_version = port::StripSuffixString(dso_version, ".ld64");
       auto result = static_cast<port::StatusOr<DriverVersion> *>(data);
-      *result = StringToDriverVersion(stripped_dso_version);
+      *result = cuda::StringToDriverVersion(stripped_dso_version);
       return 1;
     }
     return 0;
   };
 
   dl_iterate_phdr(iterate_phdr, &result);
+#endif
 #endif
 
   return result;
@@ -226,7 +285,7 @@ port::StatusOr<DriverVersion> Diagnostician::FindKernelModuleVersion(
   if (offset == string::npos) {
     return port::Status(
         port::error::NOT_FOUND,
-        port::StrCat("could not find kernel module information in "
+        absl::StrCat("could not find kernel module information in "
                      "driver version file contents: \"",
                      driver_version_file_contents, "\""));
   }
@@ -238,7 +297,7 @@ port::StatusOr<DriverVersion> Diagnostician::FindKernelModuleVersion(
   // TODO(b/22689637): Eliminate the explicit namespace if possible.
   auto stripped_kernel_version =
       port::StripSuffixString(kernel_version, ".ld64");
-  return StringToDriverVersion(stripped_kernel_version);
+  return cuda::StringToDriverVersion(stripped_kernel_version);
 }
 
 void Diagnostician::WarnOnDsoKernelMismatch(
@@ -247,19 +306,53 @@ void Diagnostician::WarnOnDsoKernelMismatch(
   if (kernel_version.ok() && dso_version.ok() &&
       dso_version.ValueOrDie() == kernel_version.ValueOrDie()) {
     LOG(INFO) << "kernel version seems to match DSO: "
-              << DriverVersionToString(kernel_version.ValueOrDie());
+              << cuda::DriverVersionToString(kernel_version.ValueOrDie());
   } else {
     LOG(ERROR) << "kernel version "
-               << DriverVersionStatusToString(kernel_version)
+               << cuda::DriverVersionStatusToString(kernel_version)
                << " does not match DSO version "
-               << DriverVersionStatusToString(dso_version)
+               << cuda::DriverVersionStatusToString(dso_version)
                << " -- cannot find working devices in this configuration";
   }
 }
 
 
 port::StatusOr<DriverVersion> Diagnostician::FindKernelDriverVersion() {
-#if defined(PLATFORM_WINDOWS)
+#if defined(__APPLE__)
+  CFStringRef kext_ids[1];
+  kext_ids[0] = kDriverKextIdentifier;
+  CFArrayRef kext_id_query = CFArrayCreate(nullptr, (const void **)kext_ids, 1,
+                                           &kCFTypeArrayCallBacks);
+  CFDictionaryRef kext_infos =
+      KextManagerCopyLoadedKextInfo(kext_id_query, nullptr);
+  CFRelease(kext_id_query);
+
+  CFDictionaryRef cuda_driver_info = nullptr;
+  if (CFDictionaryGetValueIfPresent(kext_infos, kDriverKextIdentifier,
+                                    (const void **)&cuda_driver_info)) {
+    // NOTE: OSX CUDA driver does not currently store the same driver version
+    // in kCFBundleVersionKey as is returned by cuDriverGetVersion
+    CFRelease(kext_infos);
+    const CFStringRef str = (CFStringRef)CFDictionaryGetValue(
+        cuda_driver_info, kCFBundleVersionKey);
+    const char *version = CFStringGetCStringPtr(str, kCFStringEncodingUTF8);
+
+    // version can be NULL in which case treat it as empty string
+    // see
+    // https://developer.apple.com/library/mac/documentation/CoreFoundation/Conceptual/CFStrings/Articles/AccessingContents.html#//apple_ref/doc/uid/20001184-100980-TPXREF112
+    if (version == NULL) {
+      return cuda::StringToDriverVersion("");
+    }
+    return cuda::StringToDriverVersion(version);
+  }
+  CFRelease(kext_infos);
+  auto status = port::Status(
+      port::error::INTERNAL,
+      absl::StrCat(
+          "failed to read driver bundle version: ",
+          CFStringGetCStringPtr(kDriverKextIdentifier, kCFStringEncodingUTF8)));
+  return status;
+#elif defined(PLATFORM_WINDOWS)
   auto status =
       port::Status(port::error::UNIMPLEMENTED,
                    "kernel reported driver version not implemented on Windows");
@@ -269,12 +362,12 @@ port::StatusOr<DriverVersion> Diagnostician::FindKernelDriverVersion() {
   if (driver_version_file == nullptr) {
     return port::Status(
         port::error::PERMISSION_DENIED,
-        port::StrCat("could not open driver version path for reading: ",
+        absl::StrCat("could not open driver version path for reading: ",
                      kDriverVersionPath));
   }
 
   static const int kContentsSize = 1024;
-  port::InlinedVector<char, 4> contents(kContentsSize);
+  absl::InlinedVector<char, 4> contents(kContentsSize);
   size_t retcode =
       fread(contents.begin(), 1, kContentsSize - 2, driver_version_file);
   if (retcode < kContentsSize - 1) {
@@ -291,7 +384,7 @@ port::StatusOr<DriverVersion> Diagnostician::FindKernelDriverVersion() {
 
   auto status = port::Status(
       port::error::INTERNAL,
-      port::StrCat(
+      absl::StrCat(
           "failed to read driver version file contents: ", kDriverVersionPath,
           "; ferror: ", ferror(driver_version_file)));
   fclose(driver_version_file);
@@ -299,6 +392,5 @@ port::StatusOr<DriverVersion> Diagnostician::FindKernelDriverVersion() {
 #endif
 }
 
-
-}  // namespace cuda
+}  // namespace gpu
 }  // namespace stream_executor
