@@ -1,13 +1,13 @@
-package(default_visibility = [
-    "//tensorflow/lite:__subpackages__",
-    "//tensorflow/tools/pip_package:__subpackages__",
-])
-
-licenses(["notice"])  # Apache 2.0
-
 load("//tensorflow:tensorflow.bzl", "tf_py_wrap_cc")
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
-load("//tensorflow:tensorflow.bzl", "py_binary")
+load("//tensorflow:tensorflow.bzl", "py_binary", "tf_py_test")
+
+package(
+    default_visibility = [
+        "//tensorflow/lite:__subpackages__",
+        "//tensorflow/tools/pip_package:__subpackages__",
+    ],
+    licenses = ["notice"],  # Apache 2.0
+)
 
 config_setting(
     name = "tflite_convert_with_select_tf_ops",
@@ -22,9 +22,11 @@ cc_library(
     name = "toco_python_api",
     srcs = ["toco_python_api.cc"],
     hdrs = ["toco_python_api.h"],
+    features = ["no_layering_check"],
     deps = [
         "//third_party/python_runtime:headers",
         "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
         "//tensorflow/lite/python/interpreter_wrapper:python_utils",
         "//tensorflow/lite/toco:model_flags_proto_cc",
         "//tensorflow/lite/toco:toco_flags_proto_cc",
@@ -61,6 +63,7 @@ tf_py_wrap_cc(
 py_binary(
     name = "toco_from_protos",
     srcs = ["toco_from_protos.py"],
+    python_version = "PY2",
     srcs_version = "PY2AND3",
     deps = [
         ":tensorflow_wrap_toco",
@@ -75,9 +78,6 @@ tf_py_test(
         "//tensorflow:tensorflow_py",
         "//tensorflow/lite/toco:model_flags_proto_py",
         "//tensorflow/lite/toco:toco_flags_proto_py",
-    ],
-    data = [
-        ":toco_from_protos",
     ],
     tags = [
         "no_oss",

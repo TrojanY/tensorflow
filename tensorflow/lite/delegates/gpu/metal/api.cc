@@ -30,6 +30,7 @@ limitations under the License.
 #include "tensorflow/lite/delegates/gpu/metal/kernels/depthwise_conv.h"
 #include "tensorflow/lite/delegates/gpu/metal/kernels/elementwise.h"
 #include "tensorflow/lite/delegates/gpu/metal/kernels/fully_connected.h"
+#include "tensorflow/lite/delegates/gpu/metal/kernels/hard_swish.h"
 #include "tensorflow/lite/delegates/gpu/metal/kernels/max_unpooling.h"
 #include "tensorflow/lite/delegates/gpu/metal/kernels/mul.h"
 #include "tensorflow/lite/delegates/gpu/metal/kernels/padding.h"
@@ -172,6 +173,9 @@ Status Compile(const GraphFloat32& graph, const RuntimeOptions& options,
                                    node->operation.attributes),
                                options);
         break;
+      case OperationType::HARD_SWISH:
+        tasks = HardSwish(node_id, inputs[0], outputs[0], options);
+        break;
       case OperationType::MAX_UNPOOLING_2D:
         tasks = MaxUnpooling(node_id, inputs[0], inputs[1], outputs[0],
                              absl::any_cast<MaxUnpooling2DAttributes>(
@@ -251,10 +255,12 @@ Status Compile(const GraphFloat32& graph, const RuntimeOptions& options,
 
       case OperationType::APPLY_MASK:
       case OperationType::BATCH_NORMALIZATION:
+      case OperationType::BATCH_TO_SPACE:
       case OperationType::CONST:
       case OperationType::LSTM:
       case OperationType::MUL:
       case OperationType::RESIZE:
+      case OperationType::SPACE_TO_BATCH:
       case OperationType::UNKNOWN:
         return UnimplementedError("Unsupported op: " + node->operation.type);
     }
